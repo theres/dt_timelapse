@@ -3,7 +3,7 @@
 local dt = require 'darktable'
 local gettext = dt.gettext
 
-dt.configuration.check_version(..., {4,0,0}, {5,0,0})
+dt.configuration.check_version(..., {5,0,0})
 gettext.bindtextdomain('dt_timelapse', dt.configuration.config_dir..'/lua/')
 local function _(msgid)
   return gettext.dgettext('dt_timelapse', msgid)
@@ -52,7 +52,7 @@ local resolutions = {
   }
 }
 
-local framerates = {'15', '16', '23.98', '24', '25', '29,97', '30', '48', '50', '59,94', '60'}
+local framerates = {'15', '16', '23.98', '24', '25', '29,97', '30', '48', '50', '59.94', '60'}
 
 local formats = {
   ['AVI'] = {
@@ -130,16 +130,23 @@ local function replace_cb_elements(cb, new_items, to_select)
   cb.value = to_select_idx
 end
 
-local framerates_selector = dt.new_widget('combobox')
-{
+local function format(label, symbols)
+  local es1, es2 = "߶", "߷"
+  result = label:gsub("\\{", es1):gsub("\\}", es2)
+  for s,v in pairs(symbols) do
+    result = result:gsub("{"..s.."}", v)
+  end
+  return result:gsub(es1, "{"):gsub(es2, "}")
+end
+  
+local framerates_selector = dt.new_widget('combobox'){
   label = _('framerate'),
   tooltip = _('select framerate of output video'),
   value = 1,
   table.unpack(framerates)
 }
 
-local res_selector = dt.new_widget('combobox')
-{
+local res_selector = dt.new_widget('combobox'){
   label = _('resolution'),
   tooltip = _('select resolution of output video'),
   value = 1,
@@ -191,32 +198,62 @@ local destination_box = dt.new_widget('box') {
   output_directory_chooser
 }
 
+local override_output_cb = dt.new_widget('check_button'){
+  label=_(' override output file on conflict'),
+  tooltip=_('if checked, in case of file name conflict, the file will be overwritten')
+}
+
+local filename_entry = dt.new_widget('entry'){
+  tooltip=_("enter output file name without extension.\n\n".. 
+    "You can use some placeholders:\n"..
+    "- {time} - time in format HH-mm-ss\n"..
+    "- {date} - date in foramt YYYY-mm-dd\n"..
+    "- {first_file} - name of first input file\n"..
+    "- {last_file} - name of last last_file"
+    ),
+  text="timelapse_{date}_{time}" 
+}
+
+local output_box = dt.new_widget('box'){
+  orientation='vertical',
+  destination_label,
+  override_output_cb,
+  destination_box,
+  filename_entry,
+}
+
 local module_widget = dt.new_widget('box') {
   orientation = 'vertical',
   res_selector,
   framerates_selector,
   format_selector,
   codec_selector,
-  destination_label,
-  destination_box
+  output_box
 }
 
 local function support_format(storage, format)
   return true
 end
 
-local function init_export(storage, format, images, high_quality, extra_data)
+local function init_export(storage, img_format, images, high_quality, extra_data)
   extra_data['tmp_dir'] = dt.configuration.tmp_dir .. '/dt_timelapse_' .. os.time()
   extra_data['fps'] = framerates_selector.value
   extra_data['res'] = extract_resolution(res_selector.value)
   extra_data['codec'] = codec_selector.value
-  extra_data['img_ext'] = '.'..format.extension
-  extra_data['out_ext'] = formats[format_selector.value]['extension']
+  extra_data['img_ext'] = '.'..img_format.extension
+  extra_data['out_ext'] = '.'..formats[format_selector.value]['extension']
   if auto_output_directory_btn.value then
     extra_data['out'] = images[1].path
   else
     extra_data['out'] = output_directory_chooser.value
   end
+  local filename_mappings = {
+    date = os.date("%Y-%m-%d"),
+    time = os.date("%H-%M-%S"),
+    first_file = images[1].filename,
+    last_file = images[#images].filename
+  }
+  extra_data['filename'] = format(filename_entry.text, filename_mappings)
 end
 
 local function export(extra_data)
@@ -226,8 +263,13 @@ local function export(extra_data)
   local codec = extra_data['codec']
   local img_ext = extra_data['img_ext']
   --local path = file_chooser_button_path.value..'/out.mp4'
-  local path = '"'..extra_data['out']..'/out.'..extra_data['out_ext']..'"'
-  local cmd = 'ffmpeg -y -r '..fps..' -i '..dir..'/%d'..img_ext..' -s:v '..res..' -c:v '..codec..' -crf 1 -preset slow '..path
+  local filename = extra_data['filename']
+  local path = '"'..extra_data['out']..'/'..filename..extra_data['out_ext']..'"'
+  
+  local dir_create_result = dt.control.execute('mkdir -p '..path:match(".*/")..'"')
+  if dir_create_result ~= 0 then return dir_create_result end
+
+  local cmd = 'ffmpeg -y -r '..fps..' -i '..dir..'/%d'..img_ext..' -s:v '..res..' -c:v '..codec..' -crf 18 -preset veryslow '..path
   return dt.control.execute(cmd)
 end
 
