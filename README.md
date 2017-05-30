@@ -4,12 +4,13 @@ This plugin allow to export selected images as a timelapse video thanks to `ffmp
 
 # THIS PLUGIN IS STILL `WORK IN PROGRESS`
 
+# CURRENT VERSION REQUIRE SOME ADDITIONAL CHANGES IN DARKTABLE CODEBASE, I HOPE IT WILL BE AVAILABLE IN MASTER BRANCH SOON
+
 ## TODO
  - [x] allow to simple export for specified location
  - [ ] review of specified formats/codecs/framerates
  - [ ] automatic detect available formats/codecs and shrink predefined list
  - [ ] persist previous selected parameters
- - [ ] allow to reset destination
  - [ ] allow to add music to video
  - [ ] add translations
 

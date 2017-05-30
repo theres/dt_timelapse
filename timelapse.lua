@@ -1,5 +1,3 @@
--- ffmpeg -r 15 -start_number 2548 -i IMGP%d.jpg -s 1024x768 -vcodec copy tt3.mp4
-
 local dt = require 'darktable'
 local gettext = dt.gettext
 
@@ -8,6 +6,8 @@ gettext.bindtextdomain('dt_timelapse', dt.configuration.config_dir..'/lua/')
 local function _(msgid)
   return gettext.dgettext('dt_timelapse', msgid)
 end
+
+---- DECLARATIONS
 
 local resolutions = {
   ['QVGA'] = {
@@ -103,6 +103,7 @@ local function extract_resolution(description)
   return '100x100'
 end
 
+---- GENERIC UTILS
 
 local function replace_cb_elements(cb, new_items, to_select)
   if to_select == nil then
@@ -122,7 +123,7 @@ local function replace_cb_elements(cb, new_items, to_select)
     cb[i] = name
   end
   if old_elements_count > #new_items then
-    for j=old_elements_count, #new_items + 1, -1 do
+    for j = old_elements_count, #new_items + 1, -1 do
       cb[j] = nil
     end
   end
@@ -131,40 +132,75 @@ local function replace_cb_elements(cb, new_items, to_select)
 end
 
 local function format(label, symbols)
-  local es1, es2 = "߶", "߷"
-  result = label:gsub("\\{", es1):gsub("\\}", es2)
+  local es1, es2 = "\u{ffe0}", "\u{ffe1}" -- for simpliscity, just some strange utf characters 
+  local result = label:gsub("\\{", es1):gsub("\\}", es2)
   for s,v in pairs(symbols) do
     result = result:gsub("{"..s.."}", v)
   end
   return result:gsub(es1, "{"):gsub(es2, "}")
 end
-  
+
+-----  COMPONENTS
+
+local function combobox_pref_read(name, all_values)
+  local value = dt.preferences.read("theres/dt_timelapse", name, "string")
+  for i,v in pairs(all_values) do
+    if v == value then return i end
+  end
+  return 1
+end
+
+local function combobox_pref_write(name)
+  local writer = function(widget)
+    dt.preferences.write("theres/dt_timelapse", name, "string", widget.value)
+  end
+  return writer
+end
+
+local function string_perf_read(name, default)
+  local value = dt.preferences.read("theres/dt_timelapse", name, "string")
+  if value ~= nil and value ~= "" then return value end
+  return default
+end
+
+local function string_perf_write(name, widget_attribute)
+  widget_attribute = widget_attribute or "value"
+  local writer = function(widget)
+    dt.preferences.write("theres/dt_timelapse", name, "string", widget[widget_attribute])
+  end
+  return writer
+end
+
 local framerates_selector = dt.new_widget('combobox'){
   label = _('framerate'),
   tooltip = _('select framerate of output video'),
-  value = 1,
+  value = combobox_pref_read("framerate", framerates),
+  changed_callback = combobox_pref_write('framerate'), 
   table.unpack(framerates)
 }
 
 local res_selector = dt.new_widget('combobox'){
   label = _('resolution'),
   tooltip = _('select resolution of output video'),
-  value = 1,
+  value = combobox_pref_read('resolution', res_list),
+  changed_callback = combobox_pref_write('resolution'),
   table.unpack(res_list)
 }
 
 local codec_selector = dt.new_widget('combobox'){
   label = _('codec'),
   tooltip = _('select codec'),
-  value = 1,
+  value = combobox_pref_read('codec', codec_list),
+  changed_callback = combobox_pref_write('codec'),
   table.unpack(codec_list)
 }
 
 local format_selector = dt.new_widget('combobox'){
   label = _('format container'),
   tooltip = _('select format of output video'),
-  value = 1,
-  changed_callback = function(widget) 
+  value = combobox_pref_read('format', format_list),
+  changed_callback = function(widget)
+    combobox_pref_write('format')(widget)
     codec_list = formats[widget.value]['codecs']
     table.sort(codec_list)
     replace_cb_elements(codec_selector, codec_list)
@@ -172,7 +208,7 @@ local format_selector = dt.new_widget('combobox'){
   table.unpack(format_list)
 }
 
-local destination_label = dt.new_widget('label'){
+local destination_label = dt.new_widget('section_label'){
   label = _('output file destination'),
   tooltip = _('settings of output file destination and name')
 }
@@ -181,37 +217,45 @@ local output_directory_chooser = dt.new_widget('file_chooser_button'){
   title = _('Select export path'),  -- The title of the window when choosing a file
   is_directory = true,             -- True if the file chooser button only allows directories to be selecte
   tooltip =_('select the target directory for the timelapse. \nthe filename is created automatically.'),
-  value = os.getenv('HOME')
+  value = string_perf_read("export_path", os.getenv('HOME')),
+  changed_callback = string_perf_write("export_path")
 }
 
 local auto_output_directory_btn = dt.new_widget('check_button') {
-  label='',
+  label = '',
   tooltip = _('if selected, output video will be placed in the same directory as first of selected images'),
-  clicked_callback = function () 
+  value = not dt.preferences.read("theres/dt_timelapse", "not_auto_output_directory", "bool"), -- reverse, for true as default
+  clicked_callback = function (widget)
+    dt.preferences.write("theres/dt_timelapse", "not_auto_output_directory", "bool",  not widget.value)
     output_directory_chooser.sensitive = not output_directory_chooser.sensitive 
   end
 }
 
 local destination_box = dt.new_widget('box') {
-  orientation='horizontal',
+  orientation = 'horizontal',
   auto_output_directory_btn,
   output_directory_chooser
 }
 
 local override_output_cb = dt.new_widget('check_button'){
-  label=_(' override output file on conflict'),
-  tooltip=_('if checked, in case of file name conflict, the file will be overwritten')
+  label = _(' override output file on conflict'),
+  tooltip = _('if checked, in case of file name conflict, the file will be overwritten'),
+  value = dt.preferences.read("theres/dt_timelapse", "override_output", "bool"),
+  clicked_callback = function (widget)
+    dt.preferences.write("theres/dt_timelapse", "override_output", "bool",  widget.value)
+  end
 }
 
 local filename_entry = dt.new_widget('entry'){
-  tooltip=_("enter output file name without extension.\n\n".. 
+  tooltip = _("enter output file name without extension.\n\n".. 
     "You can use some placeholders:\n"..
     "- {time} - time in format HH-mm-ss\n"..
     "- {date} - date in foramt YYYY-mm-dd\n"..
     "- {first_file} - name of first input file\n"..
     "- {last_file} - name of last last_file"
     ),
-  text="timelapse_{date}_{time}" 
+  text = string_perf_read("filename_entry","timelapse_{date}_{time}"),
+  changed_callback = string_perf_write("filename_entry", "text")
 }
 
 local output_box = dt.new_widget('box'){
@@ -228,8 +272,10 @@ local module_widget = dt.new_widget('box') {
   framerates_selector,
   format_selector,
   codec_selector,
-  output_box
+  output_box,
 }
+
+---- EXPORT & REGISTRATION
 
 local function support_format(storage, format)
   return true
