@@ -266,6 +266,15 @@ local output_box = dt.new_widget('box'){
   filename_entry,
 }
 
+local open_after_export_cb = dt.new_widget('check_button'){
+  label = _(' open after export'),
+  tooltip = _('open video file after successful export'),
+  value = dt.preferences.read("theres/dt_timelapse", "open_after_export", "bool"),
+  clicked_callback = function (widget)
+    dt.preferences.write("theres/dt_timelapse", "open_after_export", "bool",  widget.value)
+  end
+}
+
 local module_widget = dt.new_widget('box') {
   orientation = 'vertical',
   res_selector,
@@ -273,6 +282,7 @@ local module_widget = dt.new_widget('box') {
   format_selector,
   codec_selector,
   output_box,
+  open_after_export_cb
 }
 
 ---- EXPORT & REGISTRATION
@@ -300,6 +310,7 @@ local function init_export(storage, img_format, images, high_quality, extra_data
     last_file = images[#images].filename
   }
   extra_data['filename'] = format(filename_entry.text, filename_mappings)
+  extra_data['open_after_export'] = open_after_export_cb.value
 end
 
 local function export(extra_data)
@@ -316,7 +327,7 @@ local function export(extra_data)
   if dir_create_result ~= 0 then return dir_create_result end
 
   local cmd = 'ffmpeg -y -r '..fps..' -i '..dir..'/%d'..img_ext..' -s:v '..res..' -c:v '..codec..' -crf 18 -preset veryslow '..path
-  return dt.control.execute(cmd)
+  return dt.control.execute(cmd), path
 end
 
 local function finalize_export(storage, image_table, extra_data)
@@ -337,11 +348,14 @@ local function finalize_export(storage, image_table, extra_data)
       count = count + 1
     end
     dt.print('Start video building...')
-    local result = export(extra_data)
+    local result,path = export(extra_data)
     if result ~= 0 then 
       dt.print(_('ERROR: cannot build image, see console for more info')) 
     else
       dt.print(_('SUCCESS'))
+      if extra_data['open_after_export'] then
+        dt.control.execute('xdg-open '..path)
+      end
     end
 
     dt.control.execute('rm -rf '..tmp_dir)
